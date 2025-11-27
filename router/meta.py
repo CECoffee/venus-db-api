@@ -14,18 +14,17 @@ async def load_database_groups() -> List[Dict[str, Any]]:
     return [{"id": r["id"], "label": r["label"], "type": r["type"]} for r in rows]
 
 async def load_databases() -> List[Dict[str, Any]]:
-    rows = await fetch("SELECT id, label, group_id, source_type, extra FROM databases ORDER BY id")
+    rows = await fetch("SELECT id, label, group_id, source_type FROM databases ORDER BY id")
     res = []
     for r in rows:
         # load filter_fields for each db
-        frows = await fetch("SELECT key, label, field_type, meta FROM db_filter_fields WHERE db_id = $1 ORDER BY id", r["id"])
+        frows = await fetch("SELECT key, label, unit FROM db_filter_fields WHERE db_id = $1 ORDER BY id", r["id"])
         filter_fields = []
         for f in frows:
             filter_fields.append({
                 "key": f["key"],
                 "label": f["label"],
-                "type": f["field_type"],
-                "meta": f["meta"]
+                "unit": f["unit"]
             })
         item = {
             "id": r["id"],
@@ -35,8 +34,6 @@ async def load_databases() -> List[Dict[str, Any]]:
         }
         if filter_fields:
             item["filter_fields"] = filter_fields
-        if r.get("extra"):
-            item["extra"] = r["extra"]
         res.append(item)
     return res
 

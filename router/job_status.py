@@ -1,94 +1,94 @@
-from utils.database import fetchrow
-from . import router
 from fastapi import Depends, HTTPException, status
 
-from auth import get_principal, Principal, check_db_scope_permission
-from queue_redis import get_queue_position, get_task
-from schemas import StatusResponse
+from auth import get_principal, Principal
+from config import SLURM_USER
+from router import router
+from utils.database import fetchrow
+from utils.slurm import get_slurm_queue_position, query_slurm_job_state
 
 
-@router.get("/api/v1/search/job/{task_id}/status", response_model=StatusResponse)
+@router.get("/api/v1/search/job/{task_id}/status")
 async def get_job_status(task_id: str, principal: Principal = Depends(get_principal)):
-    # rate limit check
-    # allowed = await check_rate_limit(principal.id)
-    # if not allowed:
-    #   raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too Many Requests")
-    """
-    先尝试从 Redis 读取 task:{task_id}（快速路径）。
-    如果 Redis 中不存在该 key，则回退到 Postgres 的 tasks 表读取（持久化路径）。
-    权限检查基于 principal.platform_id 与 principal.scopes。
-    """
-    # --------- Fast path: try Redis ----------
-    data = await get_task(task_id)  # returns dict or None
-    source = "redis"
-    if not data:
-        # --------- Fallback: try Postgres tasks table ----------
-        source = "postgres"
-        trow = await fetchrow(
-            "SELECT owner, token_key, requested_db_scope, detected_mode, content, status, progress, error "
-            "FROM tasks WHERE id = $1",
-            task_id
-        )
-        if not trow:
-            # Not found anywhere
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    trow = await fetchrow(
+        "SELECT id, owner, token_key, requested_db_scope, detected_mode, content, status, error, slurm_job_id "
+        "FROM tasks WHERE id = $1",
+        task_id
+    )
+    if not trow:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
-        # Normalize the row into same shape as Redis get_task produces
-        data = {
-            "owner": trow.get("owner"),
-            "token_key": trow.get("token_key") or "",
-            "requested_db_scope": trow.get("requested_db_scope") or [],
-            "detected_mode": trow.get("detected_mode"),
-            "query_text": trow.get("content"),
-            "status": trow.get("status") or "PENDING",
-            "progress": int(trow.get("progress") or 0),
-            "error": trow.get("error"),
-        }
-
-    # --------- Permission check ----------
-    # Allow if the principal's owner matches the task owner (platform-level ownership),
-    # otherwise require that principal.scopes grants access to all private dbs used by the task.
-    # owner = data.get("owner")
-    token_key = data.get("token_key")
-    # if principal.kind == "api_key" and principal.token_key == token_key:
-    #     pass
-    # elif owner and principal.owner and owner == principal.owner:
-    #     pass
-    # else
-    #     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    if not principal.token_key == token_key:
+    # 权限校验：principal.token_key 或 owner 匹配
+    token_key = trow.get("token_key") or ""
+    owner = trow.get("owner")
+    if not (principal.token_key == token_key or principal.owner == owner):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-        # requested = data.get("requested_db_scope", []) or []
-        # ok, bad_scope = check_db_scope_permission(principal, requested)
-        # if not ok:
-        #     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to private DB")
 
-    # --------- Queue position ----------
-    # If the status is PENDING and the task still exists in Redis queue, compute its position.
-    # If we read from Postgres (meaning Redis key likely expired / migrated), we default queue_position to 0.
-    stat = data.get("status")
-    if stat == "PENDING" and source == "redis":
-        pos = await get_queue_position(task_id)
-        queue_pos = pos if pos is not None else 0
+    # 基本字段
+    job_id = trow.get("id")
+    db_status = (trow.get("status") or "PENDING").upper()
+    error = trow.get("error") or None
+    detected_mode = trow.get("detected_mode")
+    query_text = trow.get("content")
+    db_scope_used = trow.get("requested_db_scope") or []
+
+    slurm_job_id = trow.get("slurm_job_id")
+
+    queue_position = 0
+
+    # 如果存在 slurm_job_id 且状态为 PENDING 或 RUNNING，查询 Slurm 获取最新状态并映射到接口枚举
+    if slurm_job_id and db_status in ("PENDING", "RUNNING", "CREATING"):
+        slurm_state = query_slurm_job_state(str(slurm_job_id))
+        if slurm_state == "PENDING":
+            mapped = "PENDING"
+        elif slurm_state == "RUNNING":
+            mapped = "RUNNING"
+        elif slurm_state == "COMPLETED":
+            mapped = "DONE"
+            # 若 DB 还没改，我们可以尝试把它改成 DONE（可选），但这里不写 DB 更新，仅返回 DONE
+        elif slurm_state == "FAILED":
+            mapped = "FAILED"
+        else:
+            mapped = db_status
+
+        # override显示状态（但不修改 DB）
+        status_to_return = mapped
+
+        # queue position 仅在 PENDING 时有效（其他状态返回 0）
+        if status_to_return == "PENDING":
+            queue_position = get_slurm_queue_position(str(slurm_job_id), SLURM_USER)
+            if queue_position is None or queue_position < 0:
+                queue_position = 0
+        else:
+            queue_position = 0
+
     else:
-        queue_pos = 0
+        # 如果无 slurm_job_id 或者在 DB 中已标记为 DONE/FAILED，直接用 DB 状态映射
+        if db_status == "DONE":
+            status_to_return = "DONE"
+        elif db_status == "FAILED":
+            status_to_return = "FAILED"
+        elif db_status == "RUNNING":
+            status_to_return = "RUNNING"
+        else:
+            status_to_return = "PENDING"
+        queue_position = 0
 
-    # --------- Build response ----------
-    resp = {
-        "task_id": task_id,
-        "status": stat,
-        "progress": int(data.get("progress") or 0),
-        "queue_position": int(queue_pos),
-        "search_meta": None,
-        "error": data.get("error") or None,
-    }
-
-    # Intent feedback (detected_mode, query_text, db_scope_used) if available
-    if data.get("detected_mode"):
-        resp["search_meta"] = {
-            "detected_mode": data.get("detected_mode"),
-            "query_text": data.get("query_text"),
-            "db_scope_used": data.get("requested_db_scope") or []
+    # 构造 search_meta（当 detected_mode 可用时返回，否则 null）
+    search_meta = None
+    if detected_mode:
+        search_meta = {
+            "query_type": detected_mode,
+            "query_text": query_text,
+            "scope": db_scope_used
         }
+
+    # 最终响应严格按照文档字段名
+    resp = {
+        "job_id": job_id,
+        "status": status_to_return,
+        "queue_position": int(queue_position),
+        "search_meta": search_meta,
+        "error": error
+    }
 
     return resp

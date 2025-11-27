@@ -10,12 +10,11 @@ AMINO_ACID_ALPHABET = set(list("ACDEFGHIKLMNPQRSTVWY"))
 
 def is_uniprot_like_id(s: str) -> bool:
     s = s.strip()
+    # TODO 支持其他类型ID
     return bool(UNIPROT_REGEX.match(s))
 
-def is_amino_acid_sequence(s: str, min_len: int = 21) -> bool:
+def is_amino_acid_sequence(s: str) -> bool:
     s = s.strip().upper()
-    if len(s) < min_len:
-        return False
     return all(ch in AMINO_ACID_ALPHABET for ch in s)
 
 def detect_input_mode(content: str) -> Literal["ID","SEQUENCE","TEXT"]:
@@ -25,7 +24,4 @@ def detect_input_mode(content: str) -> Literal["ID","SEQUENCE","TEXT"]:
         return "SEQUENCE"
     return "TEXT"
 
-def validate_sequence_chars(seq: str) -> bool:
-    seq = seq.strip().upper()
-    return all(ch in AMINO_ACID_ALPHABET for ch in seq)
 

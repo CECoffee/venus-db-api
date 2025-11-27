@@ -28,5 +28,7 @@ DEFAULT_DB_SCOPE = ["group:public"]
 # Redis keys / namespaces
 QUEUE_KEY = "search_queue"             # Redis list storing task IDs (RPUSH)
 TASK_HASH_PREFIX = "task:"             # full key: task:{task_id}
-RATE_LIMIT_PREFIX = "ratelimit:"       # rate limit keys per principal
-RATE_LIMIT_PER_SEC = 1                 # allow 1 request per second for polling
+
+SLURM_PARTITION = "CPU"
+TASK_WORKDIR_BASE = "/tmp/slurm-workspace"
+SLURM_USER= "`whoami`"
