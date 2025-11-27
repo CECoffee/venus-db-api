@@ -33,8 +33,6 @@ async def get_job_status(task_id: str, principal: Principal = Depends(get_princi
 
     slurm_job_id = trow.get("slurm_job_id")
 
-    queue_position = 0
-
     # 如果存在 slurm_job_id 且状态为 PENDING 或 RUNNING，查询 Slurm 获取最新状态并映射到接口枚举
     if slurm_job_id and db_status in ("PENDING", "RUNNING", "CREATING"):
         slurm_state = query_slurm_job_state(str(slurm_job_id))

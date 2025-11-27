@@ -3,12 +3,11 @@ import sys
 
 router = APIRouter()
 
-# 导入所有子路由模块以便它们在模块导入阶段注册到上面的 router。
-# 如果你的子模块文件名不同，按实际文件名修改下面列表。
 _submodules = [
     "job_submit",
     "job_status",
     "job_results",
+    "job_delete",
     "meta",
 ]
 
