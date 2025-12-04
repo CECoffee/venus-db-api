@@ -54,22 +54,6 @@ def read_combined_tsv(path):
             })
     return hits
 
-def fetch_hit_metadata(conn, source_db, sacc):
-    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        sql = f"SELECT * FROM {source_db} WHERE accession = %s LIMIT 1"
-        try:
-            cur.execute(sql, (sacc,))
-            row = cur.fetchone()
-        except Exception:
-            # if column doesn't exist or other DB error, try next
-            row = None
-        if row:
-            organism = row["organism"]
-            external_url = row["external_url"]
-            attributes = row["attributes"]
-            return {"organism": organism, "external_url": external_url, "attributes": attributes}
-    return None
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--input", required=True, help="combined tsv path")
@@ -88,6 +72,11 @@ def main():
 
     hits = read_combined_tsv(combined_path)
     if not hits:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO results (task_id, total, results) VALUES (%s, %s, %s)",
+                            (task_id, 0, json.dumps([])))
+                cur.execute("UPDATE tasks SET status=%s WHERE id=%s", ("DONE", task_id))
         print("No hits found; wrote empty results.")
         return
 
@@ -100,11 +89,7 @@ def main():
                 for src in source_list:
                     cur.execute("SELECT source_type FROM databases WHERE id = %s", (src,))
                     row = cur.fetchone()
-                    if row:
-                        source_info[src] = row["source_type"]
-                    else:
-                        # unknown source_db: mark as internal unknown but continue
-                        source_info[src] = {"id": src, "label": src, "source_type": "external"}
+                    source_info[src] = row["source_type"]
 
         # 2) for each hit, fetch metadata from the source table (if available)
         normalized_hits = []
@@ -119,27 +104,14 @@ def main():
             # default values
             source_type = source_info.get(src)
 
-            # try fetch hit-level metadata from the source table
-            hit_meta = fetch_hit_metadata(conn, src, sacc)  # may return None
-            organism = None
-            external_url = None
-            attributes = {}
-            if hit_meta:
-                organism = hit_meta.get("organism") or None
-                external_url = hit_meta.get("external_url")
-                attributes = hit_meta.get("attributes") or {}
-
             normalized_hits.append({
                 "accession": sacc,
                 "name": name,
-                "organism": organism,
                 "source_db": src,
                 "source_type": source_type,
-                "external_url": external_url,
                 "score": score,
                 "identity": identity,
-                "e_value": evalue,
-                "attributes": attributes
+                "e_value": evalue
             })
 
         # Optionally: deduplicate by accession + source_db, keep highest score
