@@ -9,6 +9,7 @@ _submodules = [
     "job_results",
     "job_delete",
     "meta",
+    "protein"
 ]
 
 # 以包相对方式导入 app.router.<mod>

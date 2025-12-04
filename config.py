@@ -25,6 +25,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # default db scope
 DEFAULT_DB_SCOPE = ["group:public"]
 
+LANGUAGE_CODES = ["en_us", "zh_cn"]
+
 # Redis keys / namespaces
 QUEUE_KEY = "search_queue"             # Redis list storing task IDs (RPUSH)
 TASK_HASH_PREFIX = "task:"             # full key: task:{task_id}

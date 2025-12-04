@@ -48,8 +48,8 @@ async def normalize_scopes(items: List[str]) -> List[str]:
     # --- 2) 查询组内资源 ---
     if groups:
         rows = await  fetch(
-            "SELECT id FROM databases WHERE group_id = ANY($1::text[])",
-            groups,
+            "SELECT id FROM databases WHERE group_id = ANY($1::text[]) AND disabled IS NOT TRUE",
+            groups
         )
         group_ids = sorted({r["id"] for r in rows})  # 给组内容一个稳定顺序
 

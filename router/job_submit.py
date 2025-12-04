@@ -45,12 +45,12 @@ def _build_blastp_command(db_scope: List[str], task_dir: str) -> List[str]:
 @router.post("/api/v1/search/job/submit", response_model=JobResponse)
 async def submit_search_job(req: SearchRequest, principal: Principal = Depends(get_principal)):
     # 解析 db_scope
-    db_scope = await normalize_scopes((req.db_scope or DEFAULT_DB_SCOPE))
+    db_scope = await normalize_scopes(req.db_scope or DEFAULT_DB_SCOPE)
     if not db_scope:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid db scope")
     ok, bad_scope = check_db_scope_permission(principal, db_scope)
     if not ok:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to private DB")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Access denied: {bad_scope}")
 
     input_mode = (req.input_mode or "AUTO").upper()
     resolved_mode = input_mode
