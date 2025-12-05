@@ -1,3 +1,4 @@
+import json
 from typing import Optional, List, Dict, Any
 
 from fastapi import Depends, Header
@@ -15,16 +16,11 @@ async def load_database_groups() -> List[Dict[str, Any]]:
     return [{"id": r["id"], "label": r["label"], "type": r["type"]} for r in rows]
 
 async def load_databases(accept_language: str) -> List[Dict[str, Any]]:
+    rows = await fetch("SELECT * FROM databases ORDER BY id")
+    res = []
     label = f"label_{accept_language}"
     sql = f"""
-        SELECT id, label_en_us, {label}, group_id, source_type, disabled
-        FROM databases
-        ORDER BY id
-        """
-    rows = await fetch(sql)
-    res = []
-    sql = f"""
-        SELECT key, label_en_us, {label}, unit FROM db_filter_fields WHERE db_id = $1
+        SELECT key, label_en_us, {label}, unit, type FROM db_filter_fields WHERE db_id = $1
         """
     for r in rows:
         # load filter_fields for each db
@@ -34,7 +30,8 @@ async def load_databases(accept_language: str) -> List[Dict[str, Any]]:
             filter_fields.append({
                 "key": f["key"],
                 "label": f[f"{label}"] or f["label_en_us"],
-                "unit": f["unit"]
+                "unit": f["unit"],
+                "type": f["type"]
             })
         item = {
             "id": r["id"],
@@ -45,6 +42,8 @@ async def load_databases(accept_language: str) -> List[Dict[str, Any]]:
         }
         if filter_fields:
             item["filter_fields"] = filter_fields
+        if r["extra"] is not None:
+            item["extra"] = json.loads(r["extra"])
         res.append(item)
     return res
 
@@ -69,7 +68,7 @@ async def meta_config(
     groups = await load_database_groups()
     dbs = await load_databases(accept_language)
 
-    allowed_scopes = normalize_scopes(principal.scopes + DEFAULT_DB_SCOPE)
+    allowed_scopes = await normalize_scopes(principal.scopes + DEFAULT_DB_SCOPE)
 
     # Build filtered db list: keep db if its group_id is public OR principal has explicit db_id
     filtered = []

@@ -121,7 +121,7 @@ def main():
             prev = dedup.get(key)
             if prev is None or (item["score"] is not None and item["score"] > prev["score"]):
                 dedup[key] = item
-        result_list = list(dedup.values())
+        result_list = list(dedup.values())[:1000]
 
         # 3) insert into results table and update task to DONE
         with conn:
